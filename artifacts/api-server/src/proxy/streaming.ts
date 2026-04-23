@@ -36,6 +36,46 @@ function sseSend(res: Response, event: string, data: unknown) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+/**
+ * Best-effort tail repair for truncated JSON tool arguments. Walks the buffer
+ * tracking strings/escapes/braces and returns the suffix needed to close
+ * everything that's still open (e.g. `"}` or `]}`). Returns "" if the buffer
+ * is empty (in which case `{}` is a fine fallback) and null if the buffer is
+ * structurally damaged in a way we can't fix with appends alone.
+ */
+export function repairJsonTail(buf: string): string | null {
+  if (!buf || buf.trim() === "") return "{}";
+  const stack: Array<"}" | "]"> = [];
+  let inString = false;
+  let escape = false;
+  let lastNonWs = "";
+  for (let i = 0; i < buf.length; i++) {
+    const c = buf[i]!;
+    if (escape) { escape = false; continue; }
+    if (inString) {
+      if (c === "\\") { escape = true; continue; }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === "{") stack.push("}");
+    else if (c === "[") stack.push("]");
+    else if (c === "}" || c === "]") {
+      const expect = stack.pop();
+      if (expect !== c) return null; // mismatched brackets — give up
+    }
+    if (c.trim()) lastNonWs = c;
+  }
+  let suffix = "";
+  if (inString) suffix += '"';
+  // If we ended right after a `,` or `:`, we owe a value. Use `null`.
+  if (lastNonWs === "," || lastNonWs === ":") suffix += "null";
+  while (stack.length > 0) suffix += stack.pop();
+  // Validate that the repair actually parses; if not, give up.
+  try { JSON.parse(buf + suffix); return suffix; }
+  catch { return null; }
+}
+
 function mapStopReason(r: string | null | undefined): "end_turn" | "max_tokens" | "stop_sequence" | "tool_use" {
   switch (r) {
     case "length": return "max_tokens";
@@ -297,6 +337,24 @@ export async function streamOpenAIToAnthropic(opts: {
     closeTextBlock();
     closeThinkingBlock();
     for (const entry of toolBlocks.values()) {
+      // Many open models occasionally cut off their JSON arguments mid-object
+      // (especially under output-token pressure). If the accumulated buffer
+      // doesn't parse, try a cheap structural repair (close any unclosed
+      // strings / brackets) and emit the fix as a final input_json_delta so
+      // the downstream Anthropic client doesn't error on JSON.parse.
+      try {
+        JSON.parse(entry.argsBuffer || "{}");
+      } catch {
+        const fix = repairJsonTail(entry.argsBuffer);
+        if (fix) {
+          sseSend(res, "content_block_delta", {
+            type: "content_block_delta",
+            index: entry.anthropicIndex,
+            delta: { type: "input_json_delta", partial_json: fix },
+          });
+          console.warn(`[nim] repaired truncated tool args for ${entry.name} (+${JSON.stringify(fix)})`);
+        }
+      }
       sseSend(res, "content_block_stop", { type: "content_block_stop", index: entry.anthropicIndex });
     }
     if (messageStarted) {

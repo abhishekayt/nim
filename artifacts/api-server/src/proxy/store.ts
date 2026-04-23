@@ -71,13 +71,17 @@ const DEFAULT_MODELS: Omit<
   ModelState,
   "successCount" | "errorCount" | "failingUntil" | "lastError"
 >[] = [
-  { id: "m1", name: "qwen/qwen2.5-coder-32b-instruct", enabled: true, categories: ["coding", "general"] },
-  { id: "m2", name: "deepseek-ai/deepseek-r1", enabled: true, categories: ["reasoning", "coding"] },
-  { id: "m3", name: "meta/llama-3.1-405b-instruct", enabled: true, categories: ["reasoning", "general"] },
-  { id: "m4", name: "meta/llama-3.3-70b-instruct", enabled: true, categories: ["general", "coding"] },
-  { id: "m5", name: "nvidia/llama-3.1-nemotron-70b-instruct", enabled: true, categories: ["general", "reasoning"] },
-  { id: "m6", name: "mistralai/mixtral-8x22b-instruct-v0.1", enabled: true, categories: ["general"] },
-  { id: "m7", name: "meta/llama-3.2-90b-vision-instruct", enabled: true, categories: ["vision", "general"] },
+  // Strongest open coders available on NIM as of 2026 — listed in router
+  // preference order so the auto-picker reaches for the best ones first.
+  { id: "m1", name: "qwen/qwen3-coder-480b-a35b-instruct", enabled: true, categories: ["coding", "reasoning", "general"] },
+  { id: "m2", name: "moonshotai/kimi-k2-instruct", enabled: true, categories: ["coding", "reasoning", "general"] },
+  { id: "m3", name: "deepseek-ai/deepseek-v3.1", enabled: true, categories: ["coding", "reasoning", "general"] },
+  { id: "m4", name: "zai-org/glm-4.6", enabled: true, categories: ["coding", "reasoning", "general"] },
+  { id: "m5", name: "deepseek-ai/deepseek-r1", enabled: true, categories: ["reasoning", "coding"] },
+  { id: "m6", name: "nvidia/llama-3.3-nemotron-super-49b-v1.5", enabled: true, categories: ["reasoning", "general", "coding"] },
+  { id: "m7", name: "qwen/qwen2.5-coder-32b-instruct", enabled: true, categories: ["coding", "general"] },
+  { id: "m8", name: "meta/llama-3.3-70b-instruct", enabled: true, categories: ["general", "coding"] },
+  { id: "m9", name: "meta/llama-3.2-90b-vision-instruct", enabled: true, categories: ["vision", "general"] },
 ];
 
 function defaultConfig(): AppConfig {

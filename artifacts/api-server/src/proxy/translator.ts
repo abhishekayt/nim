@@ -30,8 +30,17 @@ export interface AnthropicRequest {
   stop_sequences?: string[];
   stream?: boolean;
   tools?: AnthropicTool[];
-  tool_choice?: { type: "auto" | "any" | "tool"; name?: string };
+  tool_choice?: { type: "auto" | "any" | "tool"; name?: string; disable_parallel_tool_use?: boolean };
+  metadata?: Record<string, unknown>;
 }
+
+/**
+ * Default max_tokens cap when the client does not specify one. Several NIM
+ * models silently default to 1024 tokens, which truncates real coding
+ * responses mid-file and looks like "the model gave up." 8192 matches what
+ * Claude Code sends for most requests.
+ */
+const DEFAULT_MAX_TOKENS = Number(process.env["NIM_DEFAULT_MAX_TOKENS"] ?? 8192);
 
 interface OpenAIToolCall {
   id: string;
@@ -60,6 +69,12 @@ export interface OpenAIRequest {
   stream?: boolean;
   tools?: Array<{ type: "function"; function: { name: string; description?: string; parameters: Record<string, unknown> } }>;
   tool_choice?: "auto" | "none" | "required" | { type: "function"; function: { name: string } };
+  /**
+   * Default false when the proxy attaches tools — most agentic clients
+   * (including Claude Code) expect strict sequential tool use, and several
+   * open models hallucinate parallel calls otherwise.
+   */
+  parallel_tool_calls?: boolean;
 }
 
 function systemToString(sys: AnthropicRequest["system"]): string | null {
@@ -108,15 +123,21 @@ export function augmentSystemForTools(req: AnthropicRequest): AnthropicRequest {
 
 /**
  * Tool descriptions in MCP / Claude Code can be enormous (4–10 KB each), and
- * smaller models drown when 30 of them stack up in the system prompt. We keep
- * the first paragraph + first usage example, then truncate. Set
- * NIM_KEEP_FULL_TOOL_DESCRIPTIONS=1 to disable.
+ * very small models drown when 30 of them stack up in the system prompt.
+ *
+ * BUT: Claude Code's tool descriptions encode critical correctness rules
+ * (e.g. the Edit tool's "old_string must be unique" guidance, the Bash
+ * tool's "no `cd`" rule). Truncating them silently makes capable models
+ * commit the exact mistakes those rules were written to prevent.
+ *
+ * So this is OFF by default. Opt in with NIM_TRUNCATE_TOOL_DESCRIPTIONS=1
+ * if you're routing to a tiny model that can't handle the full prompt.
  */
 const TOOL_DESC_MAX = Number(process.env["NIM_TOOL_DESC_MAX"] ?? 600);
 
 export function shortenToolDescription(desc: string | undefined): string | undefined {
   if (!desc) return desc;
-  if (process.env["NIM_KEEP_FULL_TOOL_DESCRIPTIONS"] === "1") return desc;
+  if (process.env["NIM_TRUNCATE_TOOL_DESCRIPTIONS"] !== "1") return desc;
   if (desc.length <= TOOL_DESC_MAX) return desc;
   // Prefer to cut at end-of-sentence boundary near the limit
   const slice = desc.slice(0, TOOL_DESC_MAX);
@@ -214,7 +235,11 @@ export function anthropicToOpenAI(req: AnthropicRequest, model: string): OpenAIR
     messages,
     stream: req.stream,
   };
-  if (typeof req.max_tokens === "number") out.max_tokens = req.max_tokens;
+  // Always send a max_tokens. NIM defaults are tiny (often 1024) and
+  // truncate real coding answers mid-file.
+  out.max_tokens = typeof req.max_tokens === "number" && req.max_tokens > 0
+    ? req.max_tokens
+    : DEFAULT_MAX_TOKENS;
   if (typeof req.temperature === "number") out.temperature = req.temperature;
   if (typeof req.top_p === "number") out.top_p = req.top_p;
   if (req.stop_sequences && req.stop_sequences.length > 0) out.stop = req.stop_sequences;
@@ -229,6 +254,15 @@ export function anthropicToOpenAI(req: AnthropicRequest, model: string): OpenAIR
       else if (req.tool_choice.type === "any") out.tool_choice = "required";
       else if (req.tool_choice.type === "tool" && req.tool_choice.name)
         out.tool_choice = { type: "function", function: { name: req.tool_choice.name } };
+    }
+    // Default to sequential tool calls. Claude Code's loop is built around
+    // call → result → reason → next call, and several open models hallucinate
+    // duplicate parallel calls when left to their own devices. The client can
+    // still opt back in with tool_choice.disable_parallel_tool_use === false.
+    if (req.tool_choice?.disable_parallel_tool_use === false) {
+      out.parallel_tool_calls = true;
+    } else {
+      out.parallel_tool_calls = false;
     }
   }
 

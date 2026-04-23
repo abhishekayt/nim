@@ -101,6 +101,11 @@ function isMalformedToolCall(data: OpenAINonStreamResponse, hadTools: boolean): 
       /```\s*(json|tool[_ ]?call)?[\s\S]*"(name|tool|function)"\s*:[\s\S]*"(arguments|input|parameters)"/i.test(txt) ||
       /^\s*\{[\s\S]*"(name|tool|function)"\s*:[\s\S]*"(arguments|input|parameters)"[\s\S]*\}\s*$/.test(txt);
     if (looksLikeJsonToolCall) return true;
+    // Qwen-family failure mode: wraps the call in <tool_call>…</tool_call>
+    // (or <function_call>, <tool>) instead of using the function-calling API.
+    const looksLikeXmlToolCall =
+      /<\s*(tool[_ ]?call|function[_ ]?call|tool|invoke|use[_ ]?tool)\b[^>]*>/i.test(txt);
+    if (looksLikeXmlToolCall) return true;
   }
   return false;
 }
@@ -117,7 +122,11 @@ export async function callNimNonStream(
   const hadTools = !!(payload.tools && payload.tools.length > 0);
 
   // ----- Response cache (60s) -----
-  const ck = !opts.noCache ? cacheKey(payload, opts.categories ?? []) : null;
+  // Never cache tool-bearing requests: agentic loops depend on the model
+  // reacting to changing state, and serving a stale answer to "what's in
+  // src/foo.ts now?" produces silently wrong behaviour.
+  const cacheable = !opts.noCache && !hadTools;
+  const ck = cacheable ? cacheKey(payload, opts.categories ?? []) : null;
   if (ck) {
     const hit = cacheGet(ck);
     if (hit) {
