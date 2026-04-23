@@ -42,6 +42,9 @@ interface OpenAIToolCall {
 interface OpenAIMessage {
   role: "system" | "user" | "assistant" | "tool";
   content?: string | Array<Json> | null;
+  /** Reasoning trace from thinking models (Kimi K2.5, DeepSeek-R1, etc.). */
+  reasoning_content?: string | null;
+  reasoning?: string | null;
   tool_calls?: OpenAIToolCall[];
   tool_call_id?: string;
   name?: string;
@@ -240,6 +243,8 @@ export interface OpenAINonStreamResponse {
     message: {
       role: "assistant";
       content: string | null;
+      reasoning_content?: string | null;
+      reasoning?: string | null;
       tool_calls?: OpenAIToolCall[];
     };
     finish_reason: string | null;
@@ -268,10 +273,19 @@ export function openAIToAnthropic(resp: OpenAINonStreamResponse, requestedModel:
 } {
   const choice = resp.choices[0];
   const blocks: AnthropicBlock[] = [];
+  // Reasoning models (Kimi K2.5, DeepSeek-R1, GPT-OSS, Qwen3-thinking, etc.)
+  // return their chain-of-thought in a separate `reasoning_content` /
+  // `reasoning` field rather than inline <think> tags. Surface it as a
+  // proper Anthropic thinking block so Claude Code can display it.
+  const reasoning =
+    (typeof choice?.message.reasoning_content === "string" ? choice.message.reasoning_content : "") ||
+    (typeof choice?.message.reasoning === "string" ? choice.message.reasoning : "");
+  if (reasoning && reasoning.trim()) {
+    blocks.push({ type: "thinking", thinking: reasoning.trim() });
+  }
   if (choice?.message.content) {
-    // Extract <think>…</think> reasoning chains into Anthropic thinking blocks
-    // so Claude Code shows them in the dedicated thinking panel rather than
-    // dumping them into the visible answer.
+    // Some models still inline <think>…</think> tags inside content; split
+    // those out into a thinking block as well.
     const split = splitThinking(choice.message.content);
     if (split.thinking) blocks.push({ type: "thinking", thinking: split.thinking });
     if (split.text) blocks.push({ type: "text", text: split.text });

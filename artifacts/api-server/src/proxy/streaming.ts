@@ -1,4 +1,4 @@
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import { ThinkingStreamParser } from "./thinking";
 
 interface DeltaToolCall {
@@ -16,6 +16,14 @@ interface OpenAIStreamChunk {
     delta?: {
       role?: string;
       content?: string | null;
+      /**
+       * Reasoning tokens. Most "thinking" models served via OpenAI-compatible
+       * endpoints (DeepSeek-R1, Kimi K2.5, Qwen3-thinking, GPT-OSS, Magistral,
+       * etc.) emit their chain-of-thought here instead of inline <think> tags.
+       * Different providers spell it differently — handle both.
+       */
+      reasoning_content?: string | null;
+      reasoning?: string | null;
       tool_calls?: DeltaToolCall[];
     };
     finish_reason?: string | null;
@@ -43,9 +51,10 @@ function mapStopReason(r: string | null | undefined): "end_turn" | "max_tokens" 
 export async function streamOpenAIToAnthropic(opts: {
   upstream: ReadableStream<Uint8Array>;
   res: Response;
+  req?: Request;
   requestedModel: string;
 }): Promise<void> {
-  const { upstream, res, requestedModel } = opts;
+  const { upstream, res, req, requestedModel } = opts;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -144,6 +153,37 @@ export async function streamOpenAIToAnthropic(opts: {
   const decoder = new TextDecoder();
   let buffer = "";
 
+  // Send message_start immediately so the client knows the assistant is
+  // working. Without this, reasoning models that take 30+ seconds before
+  // emitting their first visible token leave Claude Code stuck on
+  // "Kneading…" with no feedback at all.
+  startMessage();
+
+  // Heartbeat: Anthropic's real API sends `event: ping` periodically to keep
+  // long-running connections alive through proxies. ~15s matches their cadence.
+  const pingTimer = setInterval(() => {
+    try { sseSend(res, "ping", { type: "ping" }); }
+    catch { /* socket dead — finally{} will clean up */ }
+  }, 15000);
+
+  // Cancel upstream if the client disconnects (user hits esc, closes the tab,
+  // etc). Otherwise we keep draining tokens from NIM and burning the user's
+  // rate-limit budget for output the user will never see.
+  const onClientClose = () => {
+    try { reader.cancel().catch(() => {}); } catch { /* ignore */ }
+  };
+  req?.on("close", onClientClose);
+
+  const emitReasoning = (raw: string) => {
+    if (!raw) return;
+    openThinkingBlock();
+    sseSend(res, "content_block_delta", {
+      type: "content_block_delta",
+      index: thinkingBlockIndex,
+      delta: { type: "thinking_delta", thinking: raw },
+    });
+  };
+
   try {
     // eslint-disable-next-line no-constant-condition
     while (true) {
@@ -174,7 +214,23 @@ export async function streamOpenAIToAnthropic(opts: {
         if (!choice) continue;
         const delta = choice.delta ?? {};
 
+        // Reasoning tokens (separate field used by Kimi K2.5, DeepSeek-R1,
+        // GPT-OSS, Qwen3-thinking, Magistral, etc.). Forward them as Anthropic
+        // thinking_delta events so Claude Code's spinner stops immediately and
+        // the user can see the model is actually working.
+        const reasoningPiece =
+          (typeof delta.reasoning_content === "string" ? delta.reasoning_content : "") ||
+          (typeof delta.reasoning === "string" ? delta.reasoning : "");
+        if (reasoningPiece) {
+          // A reasoning chunk implies the model has not started its visible
+          // answer yet — close any open text block first.
+          closeTextBlock();
+          emitReasoning(reasoningPiece);
+        }
+
         if (typeof delta.content === "string" && delta.content.length > 0) {
+          // Visible content has arrived — close any open thinking block first.
+          closeThinkingBlock();
           emitContent(delta.content);
         }
 
@@ -218,6 +274,8 @@ export async function streamOpenAIToAnthropic(opts: {
       }
     }
   } finally {
+    clearInterval(pingTimer);
+    req?.off("close", onClientClose);
     // Flush any buffered text/thinking the parser is still holding
     const tail = thinkParser.end();
     if (tail.thinking) {

@@ -53,7 +53,7 @@ router.post("/v1/messages", async (req, res) => {
     if (isStream) {
       const { ctx, body: upstream } = await callNimStream(payload, requestedModel, { categories, signals, noCache });
       console.log(`[nim] stream via ${ctx.modelName} (key ${ctx.keyId})`);
-      await streamOpenAIToAnthropic({ upstream, res, requestedModel });
+      await streamOpenAIToAnthropic({ upstream, res, req, requestedModel });
       return;
     }
     const { ctx, data } = await callNimNonStream(payload, requestedModel, { categories, signals, noCache });
