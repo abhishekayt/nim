@@ -323,7 +323,7 @@ async function runClaudeWrapped(claudeArgs: string[], port: number) {
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   };
 
-  const claude = spawn(claudeBin, claudeArgs, { env, stdio: "inherit" });
+  const claude = spawn(claudeBin, claudeArgs, { env, stdio: "inherit",shell:true });
 
   process.on("SIGINT", () => claude.kill("SIGINT"));
   process.on("SIGTERM", () => claude.kill("SIGTERM"));
