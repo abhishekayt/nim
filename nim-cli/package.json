@@ -1,0 +1,32 @@
+{
+  "name": "nim-cli",
+  "version": "0.1.0",
+  "description": "Wrap Claude Code with the NVIDIA NIM free API. Auto key rotation + model fallback.",
+  "type": "module",
+  "bin": {
+    "nim": "./dist/nim.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ./build.mjs",
+    "start": "node ./dist/nim.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepare": "node ./build.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "catalog:",
+    "esbuild": "0.27.7",
+    "typescript": "~5.9.2"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}

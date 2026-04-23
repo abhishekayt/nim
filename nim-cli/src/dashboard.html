@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Claude Code → NVIDIA NIM Wrapper</title>
+  <style>
+    :root {
+      --bg: #0b0d10;
+      --panel: #14181d;
+      --panel-2: #1b2128;
+      --border: #232a32;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #76b900; /* nvidia green */
+      --accent-2: #5a8f00;
+      --danger: #f85149;
+      --warn: #d29922;
+      --ok: #3fb950;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    header { padding: 24px 32px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    header h1 { margin: 0; font-size: 20px; }
+    header .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 32px 80px; display: grid; gap: 24px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+    .card h2 { margin: 0 0 12px; font-size: 15px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted); }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input, select, button { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+    input { min-width: 160px; }
+    button { cursor: pointer; }
+    button.primary { background: var(--accent); color: #0b0d10; border-color: var(--accent); font-weight: 600; }
+    button.primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: white; }
+    button.ghost { background: transparent; }
+    button.danger { color: var(--danger); border-color: var(--border); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+    .badge.ok { background: rgba(63, 185, 80, 0.15); color: var(--ok); }
+    .badge.warn { background: rgba(210, 153, 34, 0.15); color: var(--warn); }
+    .badge.bad { background: rgba(248, 81, 73, 0.15); color: var(--danger); }
+    .badge.muted { background: rgba(139, 148, 158, 0.15); color: var(--muted); }
+    .endpoint { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+    .label { color: var(--muted); font-size: 12px; }
+    .kv { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; font-size: 13px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--panel-2); padding: 2px 6px; border-radius: 4px; }
+    .pill-group { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .pill-group button { border-radius: 0; border: none; background: var(--panel-2); padding: 6px 12px; }
+    .pill-group button.active { background: var(--accent); color: #0b0d10; font-weight: 600; }
+    .toast { position: fixed; bottom: 20px; right: 20px; background: var(--panel-2); border: 1px solid var(--border); padding: 12px 16px; border-radius: 8px; opacity: 0; transition: opacity 0.2s; }
+    .toast.show { opacity: 1; }
+    .small { font-size: 12px; color: var(--muted); }
+    .nv { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1><span class="nv">▮</span> Claude Code → NVIDIA NIM Wrapper</h1>
+      <div class="sub">Drop-in Anthropic-compatible proxy with key rotation and model fallback.</div>
+    </div>
+    <div class="row">
+      <span class="badge ok" id="server-badge">online</span>
+    </div>
+  </header>
+  <main>
+    <section class="card">
+      <h2>How to use with Claude Code</h2>
+      <div class="kv">
+        <div class="label">Endpoint</div>
+        <div class="endpoint" id="endpoint-url">loading…</div>
+        <div class="label">Set env vars</div>
+        <div class="endpoint">ANTHROPIC_BASE_URL=&lt;endpoint above&gt;<br/>ANTHROPIC_API_KEY=anything-non-empty</div>
+        <div class="label">Then run</div>
+        <div class="endpoint">claude</div>
+      </div>
+      <p class="small" style="margin-top:12px">The proxy ignores your Anthropic key (Claude Code requires one to be set, but it's never sent upstream). NVIDIA NIM keys below are used to call NIM.</p>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>Rotation</h2>
+        <div class="kv">
+          <div class="label">Key mode</div>
+          <div class="pill-group" id="key-mode">
+            <button data-mode="auto">Auto</button>
+            <button data-mode="manual">Manual</button>
+          </div>
+          <div class="label">Active key</div>
+          <div><select id="active-key"></select></div>
+          <div class="label">Model mode</div>
+          <div class="pill-group" id="model-mode">
+            <button data-mode="auto">Auto</button>
+            <button data-mode="manual">Manual</button>
+          </div>
+          <div class="label">Active model</div>
+          <div><select id="active-model"></select></div>
+          <div class="label">NIM base URL</div>
+          <div class="row"><input id="base-url" style="flex:1; min-width:280px" /><button class="ghost" id="save-base">Save</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Behavior</h2>
+        <ul class="small" style="line-height:1.7">
+          <li><b>Auto key switching:</b> on a 429 (rate limit), the current key is parked for 5 minutes and the next available key takes over.</li>
+          <li><b>Auto model switching:</b> on a 4xx model error or 5xx upstream error, the current model is parked for 1 minute and the next enabled model is used.</li>
+          <li><b>Manual mode:</b> only the active key/model is used. Errors are recorded but no rotation happens.</li>
+          <li><b>Streaming + tool use</b> are translated to the Anthropic event format Claude Code expects.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>API Keys (max 3) — supports NVIDIA NIM, Groq, OpenRouter, Together, DeepInfra</h2>
+      <table id="keys-table">
+        <thead><tr><th>Label</th><th>Provider</th><th>Key</th><th>Status</th><th>Stats</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="row" style="margin-top:14px">
+        <input id="new-key-label" placeholder="Label (e.g. Personal)" />
+        <select id="new-key-provider">
+          <option value="nim" selected>NVIDIA NIM</option>
+          <option value="groq">Groq</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="together">Together AI</option>
+          <option value="deepinfra">DeepInfra</option>
+        </select>
+        <input id="new-key-value" placeholder="api key…" style="flex:1; min-width:240px" />
+        <button class="primary" id="add-key">Add key</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Telemetry  <span class="small" style="text-transform:none; color:var(--muted); margin-left:8px" id="telemetry-summary"></span></h2>
+      <table id="telemetry-models">
+        <thead><tr><th>Model</th><th>Requests</th><th>Errors</th><th>Cached</th><th>Avg / p95</th><th>Tokens in/out</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="row" style="margin-top:8px; justify-content:space-between">
+        <div class="small" id="cache-info"></div>
+        <div class="row">
+          <button class="ghost" id="clear-cache">Clear cache</button>
+          <button class="ghost" id="clear-telemetry">Clear telemetry</button>
+        </div>
+      </div>
+      <details style="margin-top:14px">
+        <summary class="small" style="cursor:pointer; color:var(--muted)">Recent requests</summary>
+        <table id="telemetry-recent" style="margin-top:8px">
+          <thead><tr><th>Time</th><th>Status</th><th>Model</th><th>Categories</th><th>Latency</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Models</h2>
+      <table id="models-table">
+        <thead><tr><th>Name</th><th>Status</th><th>Stats</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="row" style="margin-top:14px">
+        <input id="new-model-name" placeholder="meta/llama-3.3-70b-instruct" style="flex:1; min-width:280px" />
+        <button class="primary" id="add-model">Add model</button>
+      </div>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const toastEl = $("toast");
+    function toast(msg) { toastEl.textContent = msg; toastEl.classList.add("show"); setTimeout(() => toastEl.classList.remove("show"), 1800); }
+
+    const endpointUrl = `${location.origin}`;
+    $("endpoint-url").textContent = endpointUrl;
+
+    async function api(path, opts = {}) {
+      const r = await fetch(path, { headers: { "content-type": "application/json" }, ...opts });
+      if (!r.ok) {
+        const t = await r.text();
+        toast(`Error: ${r.status} ${t}`);
+        throw new Error(t);
+      }
+      return r.json();
+    }
+
+    function fmtCooldown(until) {
+      if (!until) return null;
+      const ms = until - Date.now();
+      if (ms <= 0) return null;
+      const s = Math.ceil(ms / 1000);
+      if (s < 60) return `${s}s`;
+      return `${Math.ceil(s / 60)}m`;
+    }
+
+    function statusBadge(item) {
+      if (!item.enabled) return `<span class="badge muted">disabled</span>`;
+      const cooldown = fmtCooldown(item.rateLimitedUntil ?? item.failingUntil);
+      if (cooldown) return `<span class="badge warn">cooldown ${cooldown}</span>`;
+      if (item.lastError) return `<span class="badge bad" title="${escapeHtml(item.lastError)}">last error</span>`;
+      return `<span class="badge ok">ready</span>`;
+    }
+
+    function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+
+    function setPillGroup(groupId, value) {
+      const group = $(groupId);
+      [...group.querySelectorAll("button")].forEach((b) => b.classList.toggle("active", b.dataset.mode === value));
+    }
+
+    let currentCfg = null;
+
+    function render(cfg) {
+      currentCfg = cfg;
+      // rotation
+      setPillGroup("key-mode", cfg.rotation.keyMode);
+      setPillGroup("model-mode", cfg.rotation.modelMode);
+      $("base-url").value = cfg.rotation.nimBaseUrl;
+
+      const ak = $("active-key");
+      ak.innerHTML = cfg.keys.map((k) => `<option value="${k.id}" ${k.id === cfg.rotation.activeKeyId ? "selected" : ""}>${escapeHtml(k.label)} (${escapeHtml(k.masked)})</option>`).join("") || `<option value="">No keys</option>`;
+      const am = $("active-model");
+      am.innerHTML = cfg.models.map((m) => `<option value="${m.id}" ${m.id === cfg.rotation.activeModelId ? "selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
+
+      // keys table
+      const ktb = document.querySelector("#keys-table tbody");
+      const providerOpts = (sel) => ["nim","groq","openrouter","together","deepinfra"].map((p) => `<option value="${p}" ${p===sel?"selected":""}>${p}</option>`).join("");
+      ktb.innerHTML = cfg.keys.map((k) => `
+        <tr>
+          <td><input data-id="${k.id}" data-field="label" value="${escapeHtml(k.label)}" style="width:130px" /></td>
+          <td><select data-id="${k.id}" data-field="providerId" style="width:120px">${providerOpts(k.providerId || "nim")}</select></td>
+          <td><code>${escapeHtml(k.masked)}</code></td>
+          <td>${statusBadge(k)} ${k.lastError ? `<div class="small" style="margin-top:4px">${escapeHtml(k.lastError.slice(0, 80))}</div>` : ""}</td>
+          <td class="small">✓ ${k.successCount} &nbsp; ✗ ${k.errorCount}</td>
+          <td class="row" style="justify-content:flex-end">
+            <button data-action="toggle-key" data-id="${k.id}" class="ghost">${k.enabled ? "Disable" : "Enable"}</button>
+            <button data-action="clear-key" data-id="${k.id}" class="ghost">Clear cooldown</button>
+            <button data-action="delete-key" data-id="${k.id}" class="danger">Remove</button>
+          </td>
+        </tr>
+      `).join("") || `<tr><td colspan="6" class="small">No keys yet. Add up to 3 API keys above.</td></tr>`;
+
+      // models table
+      const mtb = document.querySelector("#models-table tbody");
+      mtb.innerHTML = cfg.models.map((m) => `
+        <tr>
+          <td><code>${escapeHtml(m.name)}</code></td>
+          <td>${statusBadge(m)} ${m.lastError ? `<div class="small" style="margin-top:4px">${escapeHtml(m.lastError.slice(0, 80))}</div>` : ""}</td>
+          <td class="small">✓ ${m.successCount} &nbsp; ✗ ${m.errorCount}</td>
+          <td class="row" style="justify-content:flex-end">
+            <button data-action="toggle-model" data-id="${m.id}" class="ghost">${m.enabled ? "Disable" : "Enable"}</button>
+            <button data-action="clear-model" data-id="${m.id}" class="ghost">Clear cooldown</button>
+            <button data-action="delete-model" data-id="${m.id}" class="danger">Remove</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    function renderTelemetry(t) {
+      const s = t.summary;
+      $("telemetry-summary").textContent = `total ${s.total} · errors ${s.errors} · cached ${s.cached} (${(s.cacheHitRate * 100).toFixed(0)}%) · avg ${s.avgLatencyMs}ms`;
+      $("cache-info").textContent = `Cache: ${t.cache.size} entries · ${t.cache.ttlMs / 1000}s TTL`;
+      const mtb = document.querySelector("#telemetry-models tbody");
+      mtb.innerHTML = s.perModel.map((m) => `
+        <tr>
+          <td><code>${escapeHtml(m.modelName)}</code></td>
+          <td class="small">${m.count}</td>
+          <td class="small" style="color:${m.errors > 0 ? "var(--danger)" : "inherit"}">${m.errors}</td>
+          <td class="small">${m.cached}</td>
+          <td class="small">${m.avgLatencyMs}ms / ${m.p95LatencyMs}ms</td>
+          <td class="small">${m.totalInputTokens.toLocaleString()} / ${m.totalOutputTokens.toLocaleString()}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="6" class="small">No requests yet — fire one through the proxy and refresh.</td></tr>`;
+      const rtb = document.querySelector("#telemetry-recent tbody");
+      rtb.innerHTML = t.records.slice(0, 30).map((r) => {
+        const time = new Date(r.ts).toLocaleTimeString();
+        const statusClass = r.status === "ok" ? "ok" : r.status === "cached" ? "muted" : "bad";
+        return `
+          <tr>
+            <td class="small">${time}</td>
+            <td><span class="badge ${statusClass}">${r.status}${r.streaming ? " · stream" : ""}</span></td>
+            <td><code>${escapeHtml(r.modelName)}</code></td>
+            <td class="small">${(r.categories || []).join(", ") || "—"}</td>
+            <td class="small">${r.latencyMs}ms</td>
+          </tr>
+        `;
+      }).join("") || `<tr><td colspan="5" class="small">No requests recorded.</td></tr>`;
+    }
+
+    async function refresh() {
+      const [cfg, telemetry] = await Promise.all([api("/admin/status"), api("/admin/telemetry")]);
+      render(cfg);
+      renderTelemetry(telemetry);
+    }
+
+    document.addEventListener("click", async (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement)) return;
+      const action = t.dataset.action;
+      const id = t.dataset.id;
+
+      if (t.parentElement?.id === "key-mode" && t.dataset.mode) {
+        await api("/admin/rotation", { method: "PUT", body: JSON.stringify({ keyMode: t.dataset.mode }) });
+        refresh(); return;
+      }
+      if (t.parentElement?.id === "model-mode" && t.dataset.mode) {
+        await api("/admin/rotation", { method: "PUT", body: JSON.stringify({ modelMode: t.dataset.mode }) });
+        refresh(); return;
+      }
+
+      if (t.id === "add-key") {
+        const label = $("new-key-label").value.trim();
+        const key = $("new-key-value").value.trim();
+        const providerId = $("new-key-provider").value;
+        if (!key) return toast("Enter a key");
+        try { await api("/admin/keys", { method: "POST", body: JSON.stringify({ label, key, providerId }) }); $("new-key-label").value = ""; $("new-key-value").value = ""; toast("Key added"); refresh(); } catch {}
+      }
+      if (t.id === "clear-cache") {
+        await api("/admin/cache/clear", { method: "POST" }); toast("Cache cleared"); refresh();
+      }
+      if (t.id === "clear-telemetry") {
+        await api("/admin/telemetry/clear", { method: "POST" }); toast("Telemetry cleared"); refresh();
+      }
+      if (t.id === "add-model") {
+        const name = $("new-model-name").value.trim();
+        if (!name) return toast("Enter a model name");
+        await api("/admin/models", { method: "POST", body: JSON.stringify({ name }) }); $("new-model-name").value = ""; toast("Model added"); refresh();
+      }
+      if (t.id === "save-base") {
+        await api("/admin/rotation", { method: "PUT", body: JSON.stringify({ nimBaseUrl: $("base-url").value.trim() }) }); toast("Saved"); refresh();
+      }
+
+      if (action === "toggle-key" && id) {
+        const k = currentCfg.keys.find((x) => x.id === id);
+        await api(`/admin/keys/${id}`, { method: "PATCH", body: JSON.stringify({ enabled: !k.enabled }) }); refresh();
+      }
+      if (action === "delete-key" && id) {
+        if (!confirm("Remove this key?")) return;
+        await api(`/admin/keys/${id}`, { method: "DELETE" }); refresh();
+      }
+      if (action === "clear-key" && id) {
+        await api(`/admin/keys/${id}/clear-cooldown`, { method: "POST" }); refresh();
+      }
+      if (action === "toggle-model" && id) {
+        const m = currentCfg.models.find((x) => x.id === id);
+        await api(`/admin/models/${id}`, { method: "PATCH", body: JSON.stringify({ enabled: !m.enabled }) }); refresh();
+      }
+      if (action === "delete-model" && id) {
+        if (!confirm("Remove this model?")) return;
+        await api(`/admin/models/${id}`, { method: "DELETE" }); refresh();
+      }
+      if (action === "clear-model" && id) {
+        await api(`/admin/models/${id}/clear-cooldown`, { method: "POST" }); refresh();
+      }
+    });
+
+    document.addEventListener("change", async (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement)) return;
+      if (t.id === "active-key") {
+        await api("/admin/rotation", { method: "PUT", body: JSON.stringify({ activeKeyId: t.value }) }); refresh();
+      }
+      if (t.id === "active-model") {
+        await api("/admin/rotation", { method: "PUT", body: JSON.stringify({ activeModelId: t.value }) }); refresh();
+      }
+      if (t.dataset?.field === "label" && t.dataset?.id) {
+        await api(`/admin/keys/${t.dataset.id}`, { method: "PATCH", body: JSON.stringify({ label: t.value }) }); refresh();
+      }
+      if (t.dataset?.field === "providerId" && t.dataset?.id) {
+        await api(`/admin/keys/${t.dataset.id}`, { method: "PATCH", body: JSON.stringify({ providerId: t.value }) }); toast(`Provider → ${t.value}`); refresh();
+      }
+    });
+
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

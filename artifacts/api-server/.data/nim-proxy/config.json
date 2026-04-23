@@ -1,0 +1,122 @@
+{
+  "keys": [],
+  "models": [
+    {
+      "id": "m1",
+      "name": "qwen/qwen2.5-coder-32b-instruct",
+      "enabled": true,
+      "categories": [
+        "coding",
+        "general"
+      ],
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m2",
+      "name": "deepseek-ai/deepseek-r1",
+      "enabled": true,
+      "categories": [
+        "reasoning",
+        "coding"
+      ],
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m3",
+      "name": "meta/llama-3.1-405b-instruct",
+      "enabled": true,
+      "categories": [
+        "reasoning",
+        "general"
+      ],
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m4",
+      "name": "meta/llama-3.3-70b-instruct",
+      "enabled": true,
+      "categories": [
+        "general",
+        "coding"
+      ],
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m5",
+      "name": "nvidia/llama-3.1-nemotron-70b-instruct",
+      "enabled": true,
+      "categories": [
+        "general",
+        "reasoning"
+      ],
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m6",
+      "name": "mistralai/mixtral-8x22b-instruct-v0.1",
+      "enabled": true,
+      "categories": [
+        "general"
+      ],
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m7",
+      "name": "meta/llama-3.2-90b-vision-instruct",
+      "enabled": true,
+      "categories": [
+        "vision",
+        "general"
+      ],
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    }
+  ],
+  "rotation": {
+    "keyMode": "auto",
+    "modelMode": "auto",
+    "activeKeyId": null,
+    "activeModelId": "m1",
+    "nimBaseUrl": "https://integrate.api.nvidia.com/v1"
+  },
+  "providers": [
+    {
+      "id": "nim",
+      "name": "NVIDIA NIM",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "enabled": true
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "enabled": true
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "enabled": true
+    }
+  ]
+}

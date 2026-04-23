@@ -1,0 +1,66 @@
+{
+  "keys": [],
+  "models": [
+    {
+      "id": "m1",
+      "name": "meta/llama-3.3-70b-instruct",
+      "enabled": true,
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m2",
+      "name": "nvidia/llama-3.1-nemotron-70b-instruct",
+      "enabled": true,
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m3",
+      "name": "meta/llama-3.1-405b-instruct",
+      "enabled": true,
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m4",
+      "name": "qwen/qwen2.5-coder-32b-instruct",
+      "enabled": true,
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m5",
+      "name": "mistralai/mixtral-8x22b-instruct-v0.1",
+      "enabled": true,
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    },
+    {
+      "id": "m6",
+      "name": "deepseek-ai/deepseek-r1",
+      "enabled": true,
+      "failingUntil": null,
+      "lastError": null,
+      "successCount": 0,
+      "errorCount": 0
+    }
+  ],
+  "rotation": {
+    "keyMode": "auto",
+    "modelMode": "auto",
+    "activeKeyId": null,
+    "activeModelId": "m1",
+    "nimBaseUrl": "https://integrate.api.nvidia.com/v1"
+  }
+}
