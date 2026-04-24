@@ -39,8 +39,8 @@ function sseSend(res: Response, event: string, data: unknown) {
 /**
  * Best-effort tail repair for truncated JSON tool arguments. Walks the buffer
  * tracking strings/escapes/braces and returns the suffix needed to close
- * everything that's still open (e.g. `"}` or `]}`). Returns "" if the buffer
- * is empty (in which case `{}` is a fine fallback) and null if the buffer is
+ * everything that's still open (e.g. `"}` or `]}`). Returns "" if the buffer is
+ * empty (in which case `{}` is a fine fallback) and null if the buffer is
  * structurally damaged in a way we can't fix with appends alone.
  */
 export function repairJsonTail(buf: string): string | null {
@@ -113,6 +113,10 @@ export async function streamOpenAIToAnthropic(opts: {
   let usage = { input_tokens: 0, output_tokens: 0 };
   const thinkParser = new ThinkingStreamParser();
 
+  // Track thinking visibility state for proper block ordering
+  let hasEmittedThinking = false;
+  let thinkingAfterToolCall = false;
+
   const startMessage = () => {
     if (messageStarted) return;
     messageStarted = true;
@@ -155,6 +159,7 @@ export async function streamOpenAIToAnthropic(opts: {
     startMessage();
     thinkingBlockIndex = nextBlockIndex++;
     thinkingBlockOpen = true;
+    hasEmittedThinking = true;
     sseSend(res, "content_block_start", {
       type: "content_block_start",
       index: thinkingBlockIndex,
@@ -310,6 +315,11 @@ export async function streamOpenAIToAnthropic(opts: {
           }
         }
 
+        // Handle thinking that arrives after tool calls (some models do this)
+        if (reasoningPiece && toolBlocks.size > 0) {
+          thinkingAfterToolCall = true;
+        }
+
         if (choice.finish_reason) stopReason = choice.finish_reason;
       }
     }
@@ -336,6 +346,24 @@ export async function streamOpenAIToAnthropic(opts: {
     }
     closeTextBlock();
     closeThinkingBlock();
+
+    // If thinking arrived after tool calls, emit it as a separate thinking block
+    // after all tool blocks close, matching Anthropic's format expectations
+    if (thinkingAfterToolCall && tail.thinking) {
+      const anthropicIndex = nextBlockIndex++;
+      sseSend(res, "content_block_start", {
+        type: "content_block_start",
+        index: anthropicIndex,
+        content_block: { type: "thinking", thinking: "" },
+      });
+      sseSend(res, "content_block_delta", {
+        type: "content_block_delta",
+        index: anthropicIndex,
+        delta: { type: "thinking_delta", thinking: tail.thinking },
+      });
+      sseSend(res, "content_block_stop", { type: "content_block_stop", index: anthropicIndex });
+    }
+
     for (const entry of toolBlocks.values()) {
       // Many open models occasionally cut off their JSON arguments mid-object
       // (especially under output-token pressure). If the accumulated buffer

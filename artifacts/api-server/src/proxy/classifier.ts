@@ -58,9 +58,6 @@ export function classifyRequest(req: AnthropicRequest): {
   const lastLower = lastUserText.toLowerCase();
   const codingHints = /\b(refactor|implement|fix bug|stack trace|compile|typescript|javascript|python|rust|golang?|function|class\s+\w+|import\s+|const\s+\w+|def\s+\w+|\.tsx?|\.jsx?|\.py|\.rs|\.go|file:|line\s*\d+)\b/i.test(lastUserText)
     || /```/.test(lastUserText);
-  // "Build a complete X with Y", "create an app", "make me a website",
-  // "scaffold a dashboard" — these are multi-file engineering tasks even
-  // though they look short. Always route them to the strongest coder.
   const buildHints = /\b(build|create|make|scaffold|generate|set\s*up|spin\s*up|bootstrap|implement|add)\b[\s\S]{0,40}\b(app|website|site|page|dashboard|landing|todo|todolist|to-?do|component|api|backend|frontend|project|game|chatbot|crud|saas|clone|tool|cli|server|service|bot|extension|widget|form|table|chart|nextjs|next\.?js|react|vue|svelte|angular|express|fastify|django|flask|rails)\b/i.test(lastUserText);
   const reasoningHints = /\b(think|plan|design|analy[sz]e|why|how does|explain|architecture|trade.?off|approach|strategy)\b/i.test(lastLower);
   const planMode = /plan\s*mode|planning\s*phase/i.test(sysText);
@@ -72,8 +69,6 @@ export function classifyRequest(req: AnthropicRequest): {
   if (planMode) signals.push("plan-mode");
   if (totalChars > 8000) signals.push("long-context");
 
-  // A "build me X" intent is multi-step engineering — route to coding+reasoning
-  // before plain reasoning, even when the message is short.
   if (buildHints) {
     return { categories: ["coding", "reasoning", "general"], signals };
   }
@@ -87,4 +82,56 @@ export function classifyRequest(req: AnthropicRequest): {
     return { categories: ["reasoning", "general", "coding"], signals };
   }
   return { categories: ["general", "coding", "reasoning"], signals };
+}
+
+/**
+ * Enhanced classifier that uses a lightweight scoring system to determine
+ * the best model category. Returns confidence score (0-1) alongside categories.
+ */
+export function classifyRequestWithConfidence(req: AnthropicRequest): {
+  categories: ModelCategory[];
+  signals: string[];
+  confidence: number;
+} {
+  const base = classifyRequest(req);
+
+  // Calculate confidence based on signal strength
+  let score = 0;
+  let maxScore = 0;
+
+  for (const signal of base.signals) {
+    switch (signal) {
+      case "image-block":
+        score += 1.0;
+        maxScore += 1.0;
+        break;
+      case "coding-tools":
+        score += 0.9;
+        maxScore += 0.9;
+        break;
+      case "build-intent":
+        score += 0.85;
+        maxScore += 0.85;
+        break;
+      case "coding-hints":
+        score += 0.7;
+        maxScore += 0.7;
+        break;
+      case "reasoning-hints":
+        score += 0.6;
+        maxScore += 0.6;
+        break;
+      case "plan-mode":
+        score += 0.8;
+        maxScore += 0.8;
+        break;
+      case "long-context":
+        score += 0.4;
+        maxScore += 0.4;
+        break;
+    }
+  }
+
+  const confidence = maxScore > 0 ? Math.min(score / maxScore, 1) : 0.5;
+  return { ...base, confidence };
 }

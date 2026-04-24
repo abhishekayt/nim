@@ -6,7 +6,8 @@ import {
 } from "./router";
 import { withToolCallRetryHint, type OpenAIRequest, type OpenAINonStreamResponse } from "./translator";
 import { cacheGet, cacheKey, cacheSet } from "./cache";
-import { recordRequest } from "./telemetry";
+import { recordRequestDb } from "./telemetryDb";
+import { isMalformedToolCallEnhanced, extractToolCallsFromText, validateToolCalls } from "./toolValidator";
 
 export interface CallOptions {
   /** Ordered preference of model categories to use for routing. */
@@ -85,29 +86,7 @@ async function callOnce(opts: {
  *      printed as prose (common with smaller models)
  */
 function isMalformedToolCall(data: OpenAINonStreamResponse, hadTools: boolean): boolean {
-  if (!hadTools) return false;
-  const choice = data.choices?.[0];
-  if (!choice) return false;
-  const tcs = choice.message?.tool_calls ?? [];
-  for (const tc of tcs) {
-    try { JSON.parse(tc.function.arguments || "{}"); }
-    catch { return true; }
-  }
-  if (tcs.length === 0) {
-    const txt = (choice.message?.content ?? "").trim();
-    if (!txt) return false;
-    // Heuristic: looks like a fenced JSON tool-call block or raw {"name": ..., "arguments": ...}
-    const looksLikeJsonToolCall =
-      /```\s*(json|tool[_ ]?call)?[\s\S]*"(name|tool|function)"\s*:[\s\S]*"(arguments|input|parameters)"/i.test(txt) ||
-      /^\s*\{[\s\S]*"(name|tool|function)"\s*:[\s\S]*"(arguments|input|parameters)"[\s\S]*\}\s*$/.test(txt);
-    if (looksLikeJsonToolCall) return true;
-    // Qwen-family failure mode: wraps the call in <tool_call>…</tool_call>
-    // (or <function_call>, <tool>) instead of using the function-calling API.
-    const looksLikeXmlToolCall =
-      /<\s*(tool[_ ]?call|function[_ ]?call|tool|invoke|use[_ ]?tool)\b[^>]*>/i.test(txt);
-    if (looksLikeXmlToolCall) return true;
-  }
-  return false;
+  return isMalformedToolCallEnhanced(data, hadTools);
 }
 
 export async function callNimNonStream(
@@ -130,7 +109,7 @@ export async function callNimNonStream(
   if (ck) {
     const hit = cacheGet(ck);
     if (hit) {
-      recordRequest({
+      await recordRequestDb({
         ts: Date.now(),
         modelName: hit.modelName, modelId: null, keyId: null, providerId: null,
         categories: opts.categories ?? [], signals: opts.signals ?? [],
@@ -173,10 +152,12 @@ export async function callNimNonStream(
 
       if (result.ok) {
         let data = (await result.res.json()) as OpenAINonStreamResponse;
+        let toolRetries = 0;
 
         // One-shot retry if the model emitted a malformed tool call.
         if (isMalformedToolCall(data, hadTools)) {
           console.warn(`[nim] ${model.name} returned malformed tool call — retrying once with corrective hint`);
+          toolRetries++;
           const retried = await callOnce({
             baseUrl,
             apiKey: key.key,
@@ -187,16 +168,34 @@ export async function callNimNonStream(
             const retryData = (await retried.res.json()) as OpenAINonStreamResponse;
             if (!isMalformedToolCall(retryData, hadTools)) {
               data = retryData;
+            } else {
+              // Try to extract tool calls from text content as last resort
+              const extracted = extractToolCallsFromText(retryData);
+              if (extracted) {
+                data = extracted;
+                console.warn(`[nim] extracted tool calls from text for ${model.name}`);
+              }
             }
-            // If still malformed, return the retried response anyway — Claude
-            // Code will surface the parse failure and the user can intervene.
+          }
+        }
+
+        // Validate tool calls against schemas if tools are present
+        if (hadTools && data.choices?.[0]?.message?.tool_calls) {
+          const toolSchemas = payload.tools?.map((t) => ({
+            name: t.function.name,
+            description: t.function.description,
+            parameters: t.function.parameters,
+          })) ?? [];
+          const validation = validateToolCalls(data, toolSchemas);
+          if (!validation.valid) {
+            console.warn(`[nim] tool validation failed for ${model.name}: ${validation.errors.join(", ")}`);
           }
         }
 
         await markKeySuccess(key.id);
         await markModelSuccess(model.id);
         if (ck) cacheSet(ck, data, model.name);
-        recordRequest({
+        await recordRequestDb({
           ts: Date.now(),
           modelName: model.name, modelId: model.id, keyId: key.id, providerId: key.providerId ?? "nim",
           categories: opts.categories ?? [], signals: opts.signals ?? [],
@@ -205,6 +204,7 @@ export async function callNimNonStream(
           inputTokens: data.usage?.prompt_tokens ?? null,
           outputTokens: data.usage?.completion_tokens ?? null,
           errorMessage: null,
+          toolRetries,
         });
         return { ctx: { keyId: key.id, modelId: model.id, modelName: model.name }, data };
       }
@@ -219,7 +219,7 @@ export async function callNimNonStream(
         break; // switch model
       }
       await markKeyError(key.id, lastError);
-      recordRequest({
+      await recordRequestDb({
         ts: Date.now(),
         modelName: model.name, modelId: model.id, keyId: key.id, providerId: key.providerId ?? "nim",
         categories: opts.categories ?? [], signals: opts.signals ?? [],
@@ -230,7 +230,7 @@ export async function callNimNonStream(
       throw new UpstreamError(result.status, result.body);
     }
   }
-  recordRequest({
+  await recordRequestDb({
     ts: Date.now(),
     modelName: "(none)", modelId: null, keyId: null, providerId: null,
     categories: opts.categories ?? [], signals: opts.signals ?? [],
@@ -277,7 +277,7 @@ export async function callNimStream(
       if (result.ok && result.res.body) {
         await markKeySuccess(key.id);
         await markModelSuccess(model.id);
-        recordRequest({
+        await recordRequestDb({
           ts: Date.now(),
           modelName: model.name, modelId: model.id, keyId: key.id, providerId: key.providerId ?? "nim",
           categories: opts.categories ?? [], signals: opts.signals ?? [],
@@ -302,7 +302,7 @@ export async function callNimStream(
           break;
         }
         await markKeyError(key.id, lastError);
-        recordRequest({
+        await recordRequestDb({
           ts: Date.now(),
           modelName: model.name, modelId: model.id, keyId: key.id, providerId: key.providerId ?? "nim",
           categories: opts.categories ?? [], signals: opts.signals ?? [],
@@ -314,7 +314,7 @@ export async function callNimStream(
       }
     }
   }
-  recordRequest({
+  await recordRequestDb({
     ts: Date.now(),
     modelName: "(none)", modelId: null, keyId: null, providerId: null,
     categories: opts.categories ?? [], signals: opts.signals ?? [],

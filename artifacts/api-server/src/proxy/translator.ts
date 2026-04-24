@@ -1,4 +1,5 @@
 import { splitThinking } from "./thinking";
+import { buildSystemPrompt, getRecommendedMaxTokens, getContextWindow } from "./systemPrompts";
 
 type Json = unknown;
 
@@ -122,6 +123,22 @@ export function augmentSystemForTools(req: AnthropicRequest): AnthropicRequest {
 }
 
 /**
+ * Build a system prompt with per-model template injection.
+ */
+export function buildModelSystemPrompt(
+  baseSystem: string | null,
+  modelName: string,
+  hasTools: boolean,
+  enableThinking?: boolean,
+): string {
+  return buildSystemPrompt(baseSystem, modelName, {
+    hasTools,
+    enableThinking,
+    toolUseAddendum: TOOL_USE_ADDENDUM,
+  });
+}
+
+/**
  * Tool descriptions in MCP / Claude Code can be enormous (4–10 KB each), and
  * very small models drown when 30 of them stack up in the system prompt.
  *
@@ -239,7 +256,7 @@ export function anthropicToOpenAI(req: AnthropicRequest, model: string): OpenAIR
   // truncate real coding answers mid-file.
   out.max_tokens = typeof req.max_tokens === "number" && req.max_tokens > 0
     ? req.max_tokens
-    : DEFAULT_MAX_TOKENS;
+    : getRecommendedMaxTokens(model) || DEFAULT_MAX_TOKENS;
   if (typeof req.temperature === "number") out.temperature = req.temperature;
   if (typeof req.top_p === "number") out.top_p = req.top_p;
   if (req.stop_sequences && req.stop_sequences.length > 0) out.stop = req.stop_sequences;
@@ -318,7 +335,7 @@ export function openAIToAnthropic(resp: OpenAINonStreamResponse, requestedModel:
     blocks.push({ type: "thinking", thinking: reasoning.trim() });
   }
   if (choice?.message.content) {
-    // Some models still inline <think>…</think> tags inside content; split
+    // Some models still inline <think>…</thinking> tags inside content; split
     // those out into a thinking block as well.
     const split = splitThinking(choice.message.content);
     if (split.thinking) blocks.push({ type: "thinking", thinking: split.thinking });

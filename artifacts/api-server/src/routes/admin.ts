@@ -1,21 +1,28 @@
 import { Router, type IRouter } from "express";
 import { loadConfig, updateConfig, publicConfig, PROVIDER_PRESETS } from "../proxy/store";
-import { getTelemetry, clearTelemetry } from "../proxy/telemetry";
+import { getTelemetryDb, clearTelemetryDb, updateModelRankings, getModelRankings } from "../proxy/telemetryDb";
 import { cacheClear, cacheStats } from "../proxy/cache";
+import { getCacheStats, clearConversationCache } from "../proxy/conversationCache";
 
 const router: IRouter = Router();
 
-router.get("/admin/telemetry", (_req, res) => {
-  res.json({ ...getTelemetry(100), cache: cacheStats() });
+router.get("/admin/telemetry", async (_req, res) => {
+  const telemetry = await getTelemetryDb(100);
+  res.json({ ...telemetry, cache: cacheStats(), conversationCache: await getCacheStats() });
 });
 
-router.post("/admin/telemetry/clear", (_req, res) => {
-  clearTelemetry();
+router.post("/admin/telemetry/clear", async (_req, res) => {
+  await clearTelemetryDb();
   res.json({ ok: true });
 });
 
 router.post("/admin/cache/clear", (_req, res) => {
   cacheClear();
+  res.json({ ok: true });
+});
+
+router.post("/admin/conversation-cache/clear", async (_req, res) => {
+  await clearConversationCache();
   res.json({ ok: true });
 });
 
@@ -26,6 +33,18 @@ router.get("/admin/providers", (_req, res) => {
 router.get("/admin/status", async (_req, res) => {
   const cfg = await loadConfig();
   res.json(publicConfig(cfg));
+});
+
+router.get("/admin/rankings", async (req, res) => {
+  const category = typeof req.query.category === "string" ? req.query.category : undefined;
+  const rankings = await getModelRankings(category);
+  res.json({ rankings });
+});
+
+router.post("/admin/rankings/update", async (_req, res) => {
+  await updateModelRankings();
+  const rankings = await getModelRankings();
+  res.json({ ok: true, rankings });
 });
 
 router.post("/admin/keys", async (req, res) => {
