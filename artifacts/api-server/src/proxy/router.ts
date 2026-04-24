@@ -1,4 +1,5 @@
 import { loadConfig, updateConfig, type AppConfig, type KeyState, type ModelState, type ModelCategory } from "./store";
+import { getModelRankings } from "./telemetryDb";
 
 export interface ChosenKey { key: KeyState }
 export interface ChosenModel { model: ModelState }
@@ -71,7 +72,29 @@ export async function pickModel(
     // No vision model — fall through to normal picking; the request may still
     // partially work without images, better than throwing.
   }
+
+  // Try telemetry-driven rankings for the primary category
   if (categoryPref && categoryPref.length > 0) {
+    const primaryCategory = categoryPref[0];
+    try {
+      const rankings = await getModelRankings(primaryCategory);
+      if (rankings.length > 0) {
+        // Find the highest-ranked available model that matches the primary category
+        const rankedNames = new Map(rankings.map((r) => [r.modelName, r.score]));
+        const candidates = [...cfg.models]
+          .filter((m) => isAvailableModel(m, now) && modelCats(m).includes(primaryCategory))
+          .sort((a, b) => {
+            const scoreA = rankedNames.get(a.name) ?? 0;
+            const scoreB = rankedNames.get(b.name) ?? 0;
+            if (scoreB !== scoreA) return scoreB - scoreA;
+            return categoryRank(a, categoryPref) - categoryRank(b, categoryPref);
+          });
+        if (candidates.length > 0) return candidates[0]!;
+      }
+    } catch {
+      // Rankings unavailable, fall through to category-based sorting
+    }
+
     const sorted = [...cfg.models]
       .filter((m) => isAvailableModel(m, now))
       .sort((a, b) => categoryRank(a, categoryPref) - categoryRank(b, categoryPref));

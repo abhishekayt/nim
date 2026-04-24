@@ -20,7 +20,8 @@ const FILE_REF_PATTERNS = [
   /@file:\s*([^\s\n]+)/g,
   /#file\s+([^\s\n]+)/g,
   /@file\s+([^\s\n]+)/g,
-  /`([^`]+\.(?:ts|tsx|js|jsx|py|rs|go|java|cpp|c|h|md|json|yaml|yml|toml|css|scss|html))`/g,
+  /`([^`]+\.(?:ts|tsx|js|jsx|py|rs|go|java|cpp|c|h|md|json|yaml|yml|toml|css|scss|html|vue|svelte|astro|rb|php|kt|swift))`/g,
+  /\b(?:src|lib|app|test|spec|config|public|assets|components|pages|api|routes|utils|hooks|types|styles|scripts)\/[^\s\n]+\.(?:ts|tsx|js|jsx|py|rs|go|java|cpp|c|h|md|json|yaml|yml|toml|css|scss|html|vue|svelte|astro|rb|php|kt|swift)\b/g,
 ];
 
 function extractFileReferences(text: string): FileReference[] {
@@ -214,4 +215,14 @@ export function augmentRequestWithFileContext(
  */
 export function hasFileReferences(text: string): boolean {
   return extractFileReferences(text).length > 0;
+}
+
+/**
+ * Detect if a request is likely a coding task that would benefit from
+ * directory tree injection and file context.
+ */
+export function isCodingRequest(text: string): boolean {
+  const codingKeywords = /\b(refactor|implement|fix bug|stack trace|compile|typescript|javascript|python|rust|golang?|function|class\s+\w+|import\s+|const\s+\w+|def\s+\w+|\.tsx?|\.jsx?|\.py|\.rs|\.go|file:|line\s*\d+|debug|error|test|build|create|make|scaffold|generate|set\s*up|spin\s*up|bootstrap|add)\b/i;
+  const buildKeywords = /\b(app|website|site|page|dashboard|landing|todo|todolist|to-?do|component|api|backend|frontend|project|game|chatbot|crud|saas|clone|tool|cli|server|service|bot|extension|widget|form|table|chart|nextjs|next\.?js|react|vue|svelte|angular|express|fastify|django|flask|rails)\b/i;
+  return codingKeywords.test(text) || buildKeywords.test(text);
 }

@@ -91,7 +91,7 @@ function defaultConfig(): AppConfig {
     process.env["NIM_API_KEY_3"],
   ];
   const keys: KeyState[] = envKeys
-    .map((k, i) =>
+    .map((k, i): KeyState | null =>
       k && k.trim().length > 0
         ? {
             id: `k${i + 1}`,
