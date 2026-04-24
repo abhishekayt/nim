@@ -1,8 +1,15 @@
 import { createHash } from "node:crypto";
 import type { OpenAINonStreamResponse, OpenAIRequest } from "./translator";
 
-const TTL_MS = Number(process.env["NIM_CACHE_TTL_MS"] ?? 60_000);
-const MAX_ENTRIES = Number(process.env["NIM_CACHE_MAX"] ?? 200);
+function positiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+const TTL_MS = positiveIntEnv("NIM_CACHE_TTL_MS", 60_000);
+const MAX_ENTRIES = positiveIntEnv("NIM_CACHE_MAX", 200);
 
 interface Entry {
   data: OpenAINonStreamResponse;

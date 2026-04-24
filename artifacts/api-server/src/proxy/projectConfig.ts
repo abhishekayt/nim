@@ -24,6 +24,18 @@ export interface ProjectConfig {
   cache?: boolean;
   thinking?: boolean;
   shortenToolDescriptions?: boolean;
+  /**
+   * If true, the cascade router skips the cheap-first attempt and goes
+   * straight to the strongest tier for the chosen category.
+   */
+  preferAccuracy?: boolean;
+  /**
+   * Multi-sample voting for hard reasoning. Set to a number (2-5) to
+   * always run that many parallel samples, or `true` to enable the
+   * default heuristic (3 samples when category=reasoning-hard and
+   * classifier confidence is below threshold).
+   */
+  multiSample?: boolean | number;
 }
 
 let cached: ProjectConfig | null = null;

@@ -43,7 +43,7 @@ export interface AnthropicRequest {
  */
 const DEFAULT_MAX_TOKENS = Number(process.env["NIM_DEFAULT_MAX_TOKENS"] ?? 8192);
 
-interface OpenAIToolCall {
+export interface OpenAIToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };

@@ -3,12 +3,104 @@ import { loadConfig, updateConfig, publicConfig, PROVIDER_PRESETS } from "../pro
 import { getTelemetryDb, clearTelemetryDb, updateModelRankings, getModelRankings } from "../proxy/telemetryDb";
 import { cacheClear, cacheStats } from "../proxy/cache";
 import { getCacheStats, clearConversationCache } from "../proxy/conversationCache";
+import { semanticCacheStats, semanticCacheClear } from "../proxy/semanticCache";
+import { streamingCacheStats, streamingCacheClear } from "../proxy/streamingCache";
+import { getLastVerifierRun, runVerifier, recordVerifierRun, formatDiagnosticsForModel } from "../proxy/verifier";
+import { getCascadeStats } from "../proxy/cascade";
 
 const router: IRouter = Router();
 
 router.get("/admin/telemetry", async (_req, res) => {
   const telemetry = await getTelemetryDb(100);
-  res.json({ ...telemetry, cache: cacheStats(), conversationCache: await getCacheStats() });
+  res.json({
+    ...telemetry,
+    cache: cacheStats(),
+    conversationCache: await getCacheStats(),
+    semanticCache: semanticCacheStats(),
+    streamingCache: streamingCacheStats(),
+    cascade: getCascadeStats(),
+    verifier: (() => {
+      const last = getLastVerifierRun();
+      if (!last) return { lastRunAt: null, summary: "no runs yet" };
+      return {
+        lastRunAt: last.at,
+        cwd: last.cwd,
+        ran: last.result.ran,
+        diagnostics: last.result.diagnostics,
+        exitCode: last.result.exitCode,
+        durationMs: last.result.durationMs,
+        truncated: last.result.truncated,
+      };
+    })(),
+  });
+});
+
+router.post("/admin/semantic-cache/clear", (_req, res) => {
+  semanticCacheClear();
+  res.json({ ok: true });
+});
+
+router.post("/admin/streaming-cache/clear", (_req, res) => {
+  streamingCacheClear();
+  res.json({ ok: true });
+});
+
+router.get("/admin/verifier/status", (_req, res) => {
+  const last = getLastVerifierRun();
+  if (!last) {
+    res.json({
+      lastRunAt: null,
+      configured: {
+        typecheck: !!process.env["NIM_VERIFY_TYPECHECK_CMD"],
+        lint: !!process.env["NIM_VERIFY_LINT_CMD"],
+        test: !!process.env["NIM_VERIFY_TEST_CMD"],
+        runOnEdit:
+          (process.env["NIM_VERIFY_ON_EDIT"] ?? "").toLowerCase() === "1" ||
+          (process.env["NIM_VERIFY_ON_EDIT"] ?? "").toLowerCase() === "true",
+      },
+    });
+    return;
+  }
+  res.json({
+    lastRunAt: last.at,
+    cwd: last.cwd,
+    result: last.result,
+    formatted: formatDiagnosticsForModel(last.result),
+    configured: {
+      typecheck: !!process.env["NIM_VERIFY_TYPECHECK_CMD"],
+      lint: !!process.env["NIM_VERIFY_LINT_CMD"],
+      test: !!process.env["NIM_VERIFY_TEST_CMD"],
+      runOnEdit:
+        (process.env["NIM_VERIFY_ON_EDIT"] ?? "").toLowerCase() === "1" ||
+        (process.env["NIM_VERIFY_ON_EDIT"] ?? "").toLowerCase() === "true",
+    },
+  });
+});
+
+router.post("/admin/verifier/run", async (req, res) => {
+  const body = (req.body ?? {}) as { cwd?: string; touchedFiles?: string[] };
+  const cwd = body.cwd || process.env["NIM_PROJECT_DIR"] || process.cwd();
+  try {
+    const result = await runVerifier({ cwd, touchedFiles: body.touchedFiles });
+    recordVerifierRun(result, cwd);
+    res.json({
+      ok: true,
+      cwd,
+      result,
+      formatted: formatDiagnosticsForModel(result),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.get("/admin/cascade/config", (_req, res) => {
+  res.json({
+    stats: getCascadeStats(),
+    note:
+      "Cascade plan is built per-request from classifier confidence + categories. " +
+      "Set .nimrc { preferAccuracy: true } to skip cheap-first attempts.",
+  });
 });
 
 router.post("/admin/telemetry/clear", async (_req, res) => {

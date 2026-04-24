@@ -23,13 +23,15 @@ export interface TelemetryRecord {
   categories: string[];
   signals: string[];
   latencyMs: number;
-  status: "ok" | "error" | "cached";
+  status: "ok" | "error" | "cached" | "cached-semantic";
   cached: boolean;
   streaming: boolean;
   inputTokens: number | null;
   outputTokens: number | null;
   errorMessage: string | null;
   toolRetries?: number;
+  /** Number of local auto-repair passes applied to tool-call args. */
+  repairsApplied?: number;
 }
 
 export interface ModelStat {
@@ -82,7 +84,7 @@ export async function getTelemetryDb(limit = 100): Promise<{ records: TelemetryR
     categories: r.categories,
     signals: r.signals,
     latencyMs: r.latencyMs,
-    status: r.status as "ok" | "error" | "cached",
+    status: r.status as "ok" | "error" | "cached" | "cached-semantic",
     cached: r.cached,
     streaming: r.streaming,
     inputTokens: r.inputTokens,
